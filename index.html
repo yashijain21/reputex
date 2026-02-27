@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reputation Forecasting Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 5px;
+            outline: none;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans">
+    <!-- Top-level README explanation -->
+    <!--
+      Reputation Forecasting Logic:
+      The total number of reviews (x) needed to reach a Target rating is calculated using the weighted average of the Review Mix (MixWeight).
+      Formula: Target = (CurrentSum + x * MixWeight) / (CurrentCount + x)
+      Solving for x: x = (CurrentCount * (Target - CurrentRating)) / (MixWeight - Target)
+      If MixWeight <= Target, a "Mathematical Deadlock" occurs as the goal is unreachable.
+    -->
+
+    <div id="app" class="min-h-screen flex flex-col md:flex-row">
+        <!-- Sidebar / Control Center -->
+        <aside class="w-full md:w-1/3 lg:w-1/4 bg-white border-r border-gray-200 p-6 overflow-y-auto">
+            <div class="mb-8">
+                <h1 class="text-2xl font-bold text-blue-600 flex items-center gap-2">
+                    <i data-lucide="trending-up"></i> RepuForecaster
+                </h1>
+                <p class="text-sm text-gray-500">Google Rating Projection Tool</p>
+            </div>
+
+            <!-- Input Engine -->
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Business Name</label>
+                    <input type="text" id="businessName" placeholder="Acme Corp" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Current Rating</label>
+                        <input type="number" id="currentRating" value="4.2" step="0.1" min="1" max="5" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Total Reviews</label>
+                        <input type="number" id="currentReviews" value="100" min="1" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Desired Star Rating</label>
+                    <input type="number" id="targetRating" value="4.7" step="0.1" min="1" max="5" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+
+                <div class="space-y-4">
+                    <label class="block text-sm font-medium text-gray-700">Review Mix (%)</label>
+                    
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-500 mb-1">
+                            <span>5 Stars</span>
+                            <span id="label-mix5">85%</span>
+                        </div>
+                        <input type="range" id="mix5" min="0" max="100" value="85">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-500 mb-1">
+                            <span>4 Stars</span>
+                            <span id="label-mix4">10%</span>
+                        </div>
+                        <input type="range" id="mix4" min="0" max="100" value="10">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-500 mb-1">
+                            <span>3 Stars</span>
+                            <span id="label-mix3">5%</span>
+                        </div>
+                        <input type="range" id="mix3" min="0" max="100" value="5">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Reviews Per Month</label>
+                    <input type="number" id="velocity" value="10" min="1" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+
+                <button id="saveProfile" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition flex items-center justify-center gap-2">
+                    <i data-lucide="save" class="w-4 h-4"></i> Save Profile
+                </button>
+            </div>
+
+            <div class="mt-10">
+                <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Saved Profiles</h3>
+                <ul id="profileList" class="space-y-2">
+                    <!-- Saved profiles will appear here -->
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Main Dashboard -->
+        <main class="flex-1 p-6 md:p-10 overflow-y-auto">
+            <!-- Empty State -->
+            <div id="emptyState" class="hidden h-full flex flex-col items-center justify-center text-center">
+                <div class="bg-blue-100 p-6 rounded-full mb-4">
+                    <i data-lucide="bar-chart-2" class="w-12 h-12 text-blue-600"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800">No Data Yet</h2>
+                <p class="text-gray-500 max-w-md mt-2">Enter your business details in the sidebar to simulate your reputation growth roadmap.</p>
+            </div>
+
+            <!-- Content -->
+            <div id="dashboardContent">
+                <!-- Metric Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <p class="text-sm text-gray-500 font-medium uppercase">Total Reviews Needed</p>
+                        <h3 id="statReviewsNeeded" class="text-3xl font-bold text-gray-900 mt-1">0</h3>
+                        <p id="statDailyGoal" class="text-xs text-blue-600 mt-2 font-medium">--</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <p class="text-sm text-gray-500 font-medium uppercase">Estimated Date</p>
+                        <h3 id="statEstimatedDate" class="text-3xl font-bold text-gray-900 mt-1">--</h3>
+                        <p id="statMonthsCount" class="text-xs text-blue-600 mt-2 font-medium">--</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <p class="text-sm text-gray-500 font-medium uppercase">Strategy Health</p>
+                        <div id="strategyStatus" class="mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Optimized
+                        </div>
+                        <p id="deadlockWarning" class="text-xs text-red-600 mt-2 hidden">Mathematical Deadlock: Target unreachable.</p>
+                    </div>
+                </div>
+
+                <!-- Chart Section -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-10">
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-lg font-bold text-gray-800">Projection Roadmap</h3>
+                        <div class="flex bg-gray-100 p-1 rounded-lg">
+                            <button id="toggleReviewCount" class="px-3 py-1 text-xs font-medium rounded-md bg-white shadow-sm">Review Count</button>
+                            <button id="toggleTimeline" class="px-3 py-1 text-xs font-medium rounded-md text-gray-600 hover:text-gray-900 transition">Timeline</button>
+                        </div>
+                    </div>
+                    <div class="h-80 w-full">
+                        <canvas id="projectionChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Breakdown Table -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-100">
+                        <h3 class="text-lg font-bold text-gray-800">Monthly Breakdown</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-50 text-xs uppercase text-gray-500 font-semibold">
+                                <tr>
+                                    <th class="px-6 py-3">Month</th>
+                                    <th class="px-6 py-3">Reviews Added</th>
+                                    <th class="px-6 py-3">Total Reviews</th>
+                                    <th class="px-6 py-3">Projected Rating</th>
+                                </tr>
+                            </thead>
+                            <tbody id="breakdownBody" class="text-sm divide-y divide-gray-100 text-gray-700">
+                                <!-- Table rows will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Use window for accessibility from tests
+        window.state = {
+            businessName: '',
+            currentRating: 4.2,
+            currentReviews: 100,
+            targetRating: 4.7,
+            mix: { 5: 85, 4: 10, 3: 5 },
+            velocity: 10,
+            viewMode: 'count' // 'count' or 'timeline'
+        };
+
+        window.inputs = {
+            businessName: document.getElementById('businessName'),
+            currentRating: document.getElementById('currentRating'),
+            currentReviews: document.getElementById('currentReviews'),
+            targetRating: document.getElementById('targetRating'),
+            mix5: document.getElementById('mix5'),
+            mix4: document.getElementById('mix4'),
+            mix3: document.getElementById('mix3'),
+            velocity: document.getElementById('velocity')
+        };
+
+        const labels = {
+            mix5: document.getElementById('label-mix5'),
+            mix4: document.getElementById('label-mix4'),
+            mix3: document.getElementById('label-mix3')
+        };
+
+        const stats = {
+            reviewsNeeded: document.getElementById('statReviewsNeeded'),
+            dailyGoal: document.getElementById('statDailyGoal'),
+            estimatedDate: document.getElementById('statEstimatedDate'),
+            monthsCount: document.getElementById('statMonthsCount'),
+            strategyStatus: document.getElementById('strategyStatus'),
+            deadlockWarning: document.getElementById('deadlockWarning')
+        };
+
+        const breakdownBody = document.getElementById('breakdownBody');
+        const emptyState = document.getElementById('emptyState');
+        const dashboardContent = document.getElementById('dashboardContent');
+
+        // Initialize Lucide
+        lucide.createIcons();
+
+        // Linked Sliders Logic
+        window.updateSliders = function(changedId, value) {
+            const val = parseInt(value);
+            const otherIds = ['mix5', 'mix4', 'mix3'].filter(id => id !== changedId);
+            
+            const remaining = 100 - val;
+            const currentOthersTotal = parseInt(window.inputs[otherIds[0]].value) + parseInt(window.inputs[otherIds[1]].value);
+            
+            if (currentOthersTotal === 0) {
+                window.inputs[otherIds[0]].value = Math.floor(remaining / 2);
+                window.inputs[otherIds[1]].value = Math.ceil(remaining / 2);
+            } else {
+                const ratio0 = parseInt(window.inputs[otherIds[0]].value) / currentOthersTotal;
+                window.inputs[otherIds[0]].value = Math.round(remaining * ratio0);
+                window.inputs[otherIds[1]].value = 100 - val - parseInt(window.inputs[otherIds[0]].value);
+            }
+
+            // Sync labels and state
+            ['mix5', 'mix4', 'mix3'].forEach(id => {
+                const rating = id.replace('mix', '');
+                window.state.mix[rating] = parseInt(window.inputs[id].value);
+                labels[id].textContent = window.state.mix[rating] + '%';
+            });
+            
+            window.calculateMetrics();
+        }
+
+        // Calculation Logic
+        window.calculateMetrics = function() {
+            const currentCount = parseFloat(window.inputs.currentReviews.value) || 0;
+            const currentRating = parseFloat(window.inputs.currentRating.value) || 0;
+            const target = parseFloat(window.inputs.targetRating.value) || 0;
+            const velocity = parseFloat(window.inputs.velocity.value) || 1;
+            
+            // Weighted Mix Rating
+            const mixWeight = (window.state.mix[5] * 5 + window.state.mix[4] * 4 + window.state.mix[3] * 3) / 100;
+            
+            // Toggle visibility based on data
+            if (currentCount === 0 && !window.inputs.businessName.value) {
+                emptyState.classList.remove('hidden');
+                dashboardContent.classList.add('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+                dashboardContent.classList.remove('hidden');
+            }
+
+            // Formula: Target = (CurrentSum + x * MixWeight) / (CurrentCount + x)
+            // Solving for x: x = (CurrentCount * (Target - CurrentRating)) / (MixWeight - Target)
+            
+            let reviewsNeeded = 0;
+            let deadlock = false;
+
+            if (mixWeight <= target) {
+                if (currentRating < target) {
+                    deadlock = true;
+                } else {
+                    reviewsNeeded = 0;
+                }
+            } else {
+                reviewsNeeded = (currentCount * (target - currentRating)) / (mixWeight - target);
+                reviewsNeeded = Math.max(0, Math.ceil(reviewsNeeded));
+            }
+
+            // Update Stats
+            stats.reviewsNeeded.textContent = deadlock ? '∞' : reviewsNeeded.toLocaleString();
+            
+            if (deadlock) {
+                stats.strategyStatus.textContent = 'Critical';
+                stats.strategyStatus.className = 'mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800';
+                stats.deadlockWarning.classList.remove('hidden');
+                stats.estimatedDate.textContent = 'Never';
+                stats.dailyGoal.textContent = '--';
+                stats.monthsCount.textContent = '--';
+                updateChart([], target);
+                breakdownBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-gray-500">Mathematical deadlock reached. Increase your review mix quality or lower your target.</td></tr>';
+            } else {
+                stats.strategyStatus.textContent = reviewsNeeded > 500 ? 'Challenging' : 'Optimized';
+                stats.strategyStatus.className = `mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${reviewsNeeded > 500 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`;
+                stats.deadlockWarning.classList.add('hidden');
+
+                const months = reviewsNeeded / velocity;
+                stats.monthsCount.textContent = `${months.toFixed(1)} months at current velocity`;
+                
+                // Achievement Date
+                const startDate = new Date(2026, 1, 1); // February 2026
+                const endDate = new Date(startDate.getTime());
+                endDate.setMonth(startDate.getMonth() + Math.ceil(months));
+                stats.estimatedDate.textContent = reviewsNeeded === 0 ? 'Achieved' : endDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+                // Daily Goal
+                const dailyRate = (reviewsNeeded / (months * 30.44));
+                stats.dailyGoal.textContent = reviewsNeeded === 0 ? 'Goal reached!' : `You need ~${dailyRate.toFixed(1)} reviews per day`;
+
+                generateProjections(currentCount, currentRating, mixWeight, velocity, reviewsNeeded, target);
+            }
+        }
+
+        function generateProjections(currentCount, currentRating, mixWeight, velocity, totalNeeded, target) {
+            const dataPoints = [];
+            const rows = [];
+            let tempCount = currentCount;
+            let tempRating = currentRating;
+            const maxMonths = Math.min(Math.ceil(totalNeeded / velocity) + 2, 60); // Cap at 5 years for table
+            
+            // Initial State
+            dataPoints.push({ x: 0, y: currentRating, count: currentCount });
+            
+            for (let m = 1; m <= maxMonths; m++) {
+                const addedThisMonth = Math.min(velocity, Math.max(0, totalNeeded - (tempCount - currentCount)));
+                const newCount = tempCount + addedThisMonth;
+                const newSum = (tempCount * tempRating) + (addedThisMonth * mixWeight);
+                tempRating = newSum / newCount;
+                tempCount = newCount;
+
+                dataPoints.push({ x: m, y: tempRating, count: tempCount });
+
+                if (m <= 12 || m % 3 === 0 || m === maxMonths) { // Sample rows for long timelines
+                   const date = new Date(2026, 1 + m, 1);
+                   rows.push(`
+                        <tr>
+                            <td class="px-6 py-4 font-medium text-gray-900">${date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</td>
+                            <td class="px-6 py-4">${addedThisMonth.toFixed(1)}</td>
+                            <td class="px-6 py-4">${Math.round(tempCount)}</td>
+                            <td class="px-6 py-4 font-bold ${tempRating >= target ? 'text-green-600' : 'text-blue-600'}">${tempRating.toFixed(2)}</td>
+                        </tr>
+                   `);
+                }
+                
+                if (tempRating >= target && addedThisMonth < velocity) break;
+            }
+
+            breakdownBody.innerHTML = rows.join('');
+            updateChart(dataPoints, target);
+        }
+
+        // Chart Logic
+        let chart = null;
+        function updateChart(dataPoints, target) {
+            const ctx = document.getElementById('projectionChart').getContext('2d');
+            
+            if (chart) chart.destroy();
+
+            const labels = dataPoints.map(p => window.state.viewMode === 'count' ? p.count : p.x);
+            const values = dataPoints.map(p => p.y);
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Projected Rating',
+                            data: values,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 2
+                        },
+                        {
+                            label: 'Target Goal',
+                            data: Array(labels.length).fill(target),
+                            borderColor: '#ef4444',
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            min: Math.min(...values, target) - 0.1,
+                            max: Math.max(...values, target) + 0.1,
+                            ticks: { stepSize: 0.1 }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: window.state.viewMode === 'count' ? 'Total Reviews' : 'Months Passed'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `Rating: ${context.parsed.y.toFixed(2)}`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Event Listeners
+        ['mix5', 'mix4', 'mix3'].forEach(id => {
+            window.inputs[id].addEventListener('input', (e) => window.updateSliders(id, e.target.value));
+        });
+
+        ['currentRating', 'currentReviews', 'targetRating', 'velocity', 'businessName'].forEach(id => {
+            window.inputs[id].addEventListener('input', window.calculateMetrics);
+        });
+
+        document.getElementById('toggleReviewCount').addEventListener('click', () => {
+            window.state.viewMode = 'count';
+            document.getElementById('toggleReviewCount').classList.add('bg-white', 'shadow-sm');
+            document.getElementById('toggleTimeline').classList.remove('bg-white', 'shadow-sm');
+            window.calculateMetrics();
+        });
+
+        document.getElementById('toggleTimeline').addEventListener('click', () => {
+            window.state.viewMode = 'timeline';
+            document.getElementById('toggleTimeline').classList.add('bg-white', 'shadow-sm');
+            document.getElementById('toggleReviewCount').classList.remove('bg-white', 'shadow-sm');
+            window.calculateMetrics();
+        });
+
+        // Local Storage
+        const saveBtn = document.getElementById('saveProfile');
+        const profileList = document.getElementById('profileList');
+
+        saveBtn.addEventListener('click', () => {
+            const profiles = JSON.parse(localStorage.getItem('repu_profiles') || '[]');
+            const newProfile = {
+                id: Date.now(),
+                name: window.inputs.businessName.value || 'Unnamed Business',
+                currentRating: window.inputs.currentRating.value,
+                currentReviews: window.inputs.currentReviews.value,
+                targetRating: window.inputs.targetRating.value,
+                mix: { ...window.state.mix },
+                velocity: window.inputs.velocity.value
+            };
+            profiles.push(newProfile);
+            localStorage.setItem('repu_profiles', JSON.stringify(profiles));
+            renderProfiles();
+        });
+
+        function renderProfiles() {
+            const profiles = JSON.parse(localStorage.getItem('repu_profiles') || '[]');
+            profileList.innerHTML = profiles.map(p => `
+                <li class="group flex items-center justify-between p-2 hover:bg-gray-100 rounded-md cursor-pointer transition" onclick="loadProfile(${p.id})">
+                    <span class="text-sm font-medium text-gray-700 truncate">${p.name}</span>
+                    <button onclick="deleteProfile(event, ${p.id})" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </li>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        window.loadProfile = (id) => {
+            const profiles = JSON.parse(localStorage.getItem('repu_profiles') || '[]');
+            const p = profiles.find(x => x.id === id);
+            if (p) {
+                window.inputs.businessName.value = p.name;
+                window.inputs.currentRating.value = p.currentRating;
+                window.inputs.currentReviews.value = p.currentReviews;
+                window.inputs.targetRating.value = p.targetRating;
+                window.inputs.velocity.value = p.velocity;
+                window.state.mix = { ...p.mix };
+                window.inputs.mix5.value = p.mix[5];
+                window.inputs.mix4.value = p.mix[4];
+                window.inputs.mix3.value = p.mix[3];
+                
+                // Update labels
+                labels.mix5.textContent = p.mix[5] + '%';
+                labels.mix4.textContent = p.mix[4] + '%';
+                labels.mix3.textContent = p.mix[3] + '%';
+                
+                window.calculateMetrics();
+            }
+        };
+
+        window.deleteProfile = (e, id) => {
+            e.stopPropagation();
+            let profiles = JSON.parse(localStorage.getItem('repu_profiles') || '[]');
+            profiles = profiles.filter(x => x.id !== id);
+            localStorage.setItem('repu_profiles', JSON.stringify(profiles));
+            renderProfiles();
+        };
+
+        // Initial Run
+        renderProfiles();
+        window.calculateMetrics();
+    </script>
+</body>
+</html>
